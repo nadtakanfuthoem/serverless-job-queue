@@ -1,0 +1,20 @@
+{
+  "name": "background-job-processor",
+  "version": "1.0.0",
+  "description": "Background job processor for SQS messages",
+  "main": "processor.js",
+  "scripts": {
+    "start": "node processor.js",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.645.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.645.0",
+    "ulid": "^2.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "",
+  "license": "MIT"
+}

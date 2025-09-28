@@ -1,0 +1,38 @@
+# Stage 1: Build stage
+FROM --platform=linux/amd64 node:22-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY main-job/package*.json ./
+RUN npm ci --only=production
+
+# Stage 2: Runtime stage
+FROM --platform=linux/amd64 node:22-alpine
+
+# Create app user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S appuser -u 1001
+
+WORKDIR /app
+
+# Copy node_modules from builder
+COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
+
+# Copy application files
+COPY --chown=appuser:nodejs main-job/message-driven-main.js ./
+
+# Set environment variables
+ENV NODE_ENV=production \
+    POLL_INTERVAL_MS=5000 \
+    AWS_REGION=us-east-1
+
+# Switch to non-root user
+USER appuser
+
+# Health check (check if process is running)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ps aux | grep -q "[n]ode.*message-driven-main" || exit 1
+
+# Start the message-driven processor
+CMD ["node", "message-driven-main.js"]

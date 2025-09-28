@@ -1,0 +1,28 @@
+# Project Configuration
+project_name = "container-lambda"
+environment  = "dev"
+aws_region   = "us-east-1"
+
+# Container Configuration
+container_port   = 3000
+container_cpu    = 256
+container_memory = 512
+desired_count    = 1
+
+# Networking Configuration
+vpc_cidr = "10.0.0.0/16"
+public_subnet_cidrs = [
+  "10.0.1.0/24",
+  "10.0.2.0/24"
+]
+private_subnet_cidrs = [
+  "10.0.10.0/24",
+  "10.0.20.0/24"
+]
+
+# CloudWatch Configuration
+log_retention_days = 14
+
+# ECR Configuration
+ecr_repository_name = "main-job-app"
+image_tag          = "latest"

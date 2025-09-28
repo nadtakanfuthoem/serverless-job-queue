@@ -1,0 +1,29 @@
+# Pure background-job microservice (already serverless)
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Copy background-job dependencies
+COPY background-job/package*.json ./
+
+# Install production dependencies  
+RUN npm install --production
+
+# Copy background job processor
+COPY background-job/processor.js ./
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S processor -u 1001 -G nodejs
+
+# Switch to non-root user
+USER processor
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV SQS_QUEUE_URL=${SQS_QUEUE_URL}
+ENV CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+ENV AWS_REGION=${AWS_REGION}
+
+# Run the background job processor directly
+CMD ["node", "processor.js"]
