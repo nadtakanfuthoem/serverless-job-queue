@@ -2,7 +2,7 @@
 
 This directory contains Terraform configuration to deploy a **pure message-driven microservices architecture** on AWS Fargate with **no HTTP servers**. The system processes messages through SQS queues with comprehensive monitoring and ULID-based job correlation.
 
-## � Architecture Overview
+## Architecture Overview
 
 ### **Pure Message-Driven Design**
 - **No HTTP Servers**: Complete elimination of Express.js and HTTP endpoints
@@ -96,7 +96,7 @@ tf/
      --message-body '{"trigger":"test","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)'","triggerBackgroundJob":true}'
    ```
 
-## � Message-Driven Processing
+## Message-Driven Processing
 
 ### System Components
 
@@ -146,6 +146,136 @@ Each background job creates a dedicated log stream:
 - **Format**: `job-streams/YYYY-MM-DD/{ULID-JOB-ID}`
 - **Content**: Job start, processing steps, completion/error status
 - **Searchable**: Filter by job ID across all log entries
+
+### Creating Custom Log Streams
+
+If you want to create your own custom log streams for specific purposes, you can modify the CloudWatch logging configuration:
+
+#### 1. **Add Custom Log Stream in Code**
+
+In your application code (`background-job/processor.js` or `main-job/message-driven-main.js`):
+
+```javascript
+const AWS = require('aws-sdk');
+const { ulid } = require('ulid');
+
+const cloudwatchlogs = new AWS.CloudWatchLogs({
+  region: process.env.AWS_REGION || 'us-east-1'
+});
+
+async function createCustomLogStream(logGroupName, customStreamName) {
+  try {
+    await cloudwatchlogs.createLogStream({
+      logGroupName: logGroupName,
+      logStreamName: customStreamName
+    }).promise();
+    
+    console.log(`Created custom log stream: ${customStreamName}`);
+  } catch (error) {
+    if (error.code !== 'ResourceAlreadyExistsException') {
+      console.error('Error creating log stream:', error);
+    }
+  }
+}
+
+// Example usage for custom streams
+const customStreamName = `custom-streams/${new Date().toISOString().split('T')[0]}/${ulid()}`;
+await createCustomLogStream('/ecs/message-driven-microservices-prod/background-job', customStreamName);
+```
+
+#### 2. **Add Custom Log Groups via Terraform**
+
+Add to your `cloudwatch.tf` file:
+
+```hcl
+# Custom log group for special processing
+resource "aws_cloudwatch_log_group" "custom_processing" {
+  name              = "/ecs/${local.project_name}/custom-processing"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
+
+  tags = local.common_tags
+}
+
+# Custom log stream (optional - can be created programmatically)
+resource "aws_cloudwatch_log_stream" "custom_stream_example" {
+  name           = "custom-example-stream"
+  log_group_name = aws_cloudwatch_log_group.custom_processing.name
+}
+```
+
+#### 3. **Environment-Specific Log Streams**
+
+For different environments or processing types:
+
+```javascript
+// Create environment-specific streams
+const streamPatterns = {
+  error: `error-streams/${date}/${jobId}`,
+  audit: `audit-streams/${date}/${jobId}`, 
+  performance: `perf-streams/${date}/${jobId}`,
+  debug: `debug-streams/${date}/${jobId}`
+};
+
+// Usage example
+await createCustomLogStream(logGroupName, streamPatterns.error);
+await logToCustomStream(streamPatterns.error, {
+  level: 'ERROR',
+  jobId: jobId,
+  error: errorDetails,
+  timestamp: new Date().toISOString()
+});
+```
+
+#### 4. **Update IAM Permissions**
+
+Ensure your ECS task role has permission to create custom log streams by updating `security.tf`:
+
+```hcl
+resource "aws_iam_role_policy" "custom_logging" {
+  name = "${local.project_name}-${var.environment}-custom-logging"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:DescribeLogGroups"
+        ]
+        Resource = [
+          "${aws_cloudwatch_log_group.custom_processing.arn}*",
+          "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.project_name}/*"
+        ]
+      }
+    ]
+  })
+}
+```
+
+#### 5. **Query Custom Log Streams**
+
+```bash
+# List all custom log streams
+aws logs describe-log-streams \
+  --log-group-name "/ecs/message-driven-microservices-prod/custom-processing" \
+  --order-by LastEventTime --descending
+
+# Search custom logs by pattern
+aws logs filter-log-events \
+  --log-group-name "/ecs/message-driven-microservices-prod/custom-processing" \
+  --filter-pattern "ERROR" \
+  --start-time $(date -d "1 hour ago" +%s)000
+
+# Tail custom log streams
+aws logs tail "/ecs/message-driven-microservices-prod/custom-processing" --follow
+```
+
+**Note**: Custom log streams are automatically created when you first write to them, but explicitly creating them gives you better control over naming and organization.
 
 ### Testing the Message-Driven System
 
