@@ -18,6 +18,12 @@ This directory contains Terraform configuration to deploy a **pure message-drive
 - **CloudWatch**: Job-specific log streams with ULID-based correlation
 - **KMS**: End-to-end encryption for logs and messages
 
+### **Example Log Stream Output**
+
+![CloudWatch Log Stream Example](example.png)
+
+*Example of ULID-based job-specific log streams in CloudWatch, showing how background jobs create dedicated log streams with correlation tracking.*
+
 ## 📁 File Structure
 
 ```
