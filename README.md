@@ -131,13 +131,14 @@ External System → Trigger Queue → Main Job Container → Background Queue �
 
 ```mermaid
 graph LR
-    A[HTTP /hello] --> B[Generate ULID Job ID]
-    B --> C[Send to SQS Queue]
-    C --> D[Background Processor]
-    D --> E[Create Log Stream]
-    E --> F[Process Job]
-    F --> G[Log Results]
-    F --> H[Delete from Queue]
+    A[SQS Trigger Message] --> B[Main Job Container]
+    B --> C[Generate ULID Job ID]
+    C --> D[Send to Background Queue]
+    D --> E[Background Job Container]
+    E --> F[Create Log Stream]
+    F --> G[Process Job]
+    G --> H[Log Results]
+    G --> I[Delete from Queue]
 ```
 
 ### CloudWatch Job Logging
@@ -276,6 +277,140 @@ aws logs tail "/ecs/message-driven-microservices-prod/custom-processing" --follo
 ```
 
 **Note**: Custom log streams are automatically created when you first write to them, but explicitly creating them gives you better control over naming and organization.
+
+#### 6. **Tradeoffs for Custom Log Stream IDs**
+
+Before implementing custom log streams, consider these tradeoffs:
+
+##### ✅ **Advantages of Custom Log Stream IDs**
+
+**Business Logic Organization:**
+```javascript
+// Custom patterns for different job types
+const streamName = `${jobType}/${environment}/${date}/${jobId}`;
+// Example: payment-processing/prod/2025-09-28/01HK690...
+```
+
+**Enhanced Searchability:**
+```bash
+# Find all payment processing logs
+aws logs describe-log-streams --log-group-name "/ecs/app/background-job" \
+  --log-stream-name-prefix "payment-processing"
+```
+
+**Logical Grouping:**
+```javascript
+const customPatterns = {
+  critical: `critical-jobs/${date}/${jobId}`,
+  batch: `batch-processing/${date}/${batchId}/${jobId}`,
+  user: `user-actions/${userId}/${date}/${jobId}`
+};
+```
+
+**Compliance & Auditing:**
+```javascript
+// Separate streams for audit trails
+const auditStream = `audit/${department}/${date}/${jobId}`;
+const complianceStream = `compliance/${regulationType}/${date}/${jobId}`;
+```
+
+##### ❌ **Disadvantages of Custom Log Stream IDs**
+
+**Increased Complexity:**
+```javascript
+// More logic needed for stream naming
+function generateCustomStreamName(jobType, priority, userId, jobId) {
+  const date = new Date().toISOString().split('T')[0];
+  return `${jobType}/${priority}/${userId}/${date}/${jobId}`;
+}
+```
+
+**Higher CloudWatch Costs:**
+- More log streams = higher ingestion costs
+- Each stream has overhead regardless of size
+- More API calls for stream creation
+
+**Stream Limits:**
+```
+CloudWatch Limits:
+- 1,000,000 log streams per log group
+- Custom patterns can hit limits faster
+- Need rotation strategy for high-volume apps
+```
+
+**Debugging Complexity:**
+```bash
+# Harder to find logs without knowing exact pattern
+# Current: just search by jobId
+# Custom: need to know jobType + other parameters
+```
+
+##### 🎯 **Recommended Hybrid Approach**
+
+Best of both worlds - reliable default with custom options:
+
+```javascript
+async function createJobLogStream(jobId, jobType = 'default', options = {}) {
+    const now = new Date();
+    const dateString = now.toISOString().split('T')[0];
+    
+    // Default ULID-based pattern (reliable)
+    const defaultStream = `job-streams/${dateString}/${jobId}`;
+    
+    // Custom pattern (optional)
+    const customStream = options.customPattern 
+        ? `${options.customPattern}/${dateString}/${jobId}`
+        : null;
+    
+    // Try custom first, fallback to default
+    const streamName = customStream || defaultStream;
+    
+    try {
+        await createLogStream(streamName);
+        return streamName;
+    } catch (error) {
+        if (customStream && error.name === 'InvalidParameterException') {
+            console.warn(`Custom stream failed, using default: ${defaultStream}`);
+            await createLogStream(defaultStream);
+            return defaultStream;
+        }
+        throw error;
+    }
+}
+
+// Usage examples
+await createJobLogStream(jobId); // Default ULID pattern
+await createJobLogStream(jobId, 'payment', { customPattern: 'critical-jobs' });
+await createJobLogStream(jobId, 'batch', { customPattern: `user-${userId}` });
+```
+
+##### 🏆 **When to Use Custom Log Stream IDs**
+
+**✅ Use Custom When:**
+- **Compliance requirements** (separate audit trails)
+- **Multi-tenant systems** (isolate customer data)
+- **Critical vs non-critical** job separation
+- **Business domain separation** (payments, orders, users)
+- **Low to medium volume** applications
+
+**❌ Stick with ULID When:**
+- **High-volume applications** (>10k jobs/hour)
+- **Simple debugging needs** (just trace by job ID)
+- **Cost-sensitive environments**
+- **MVP/prototype phases**
+- **Single-tenant applications**
+
+##### 💡 **Recommendation for This Project**
+
+For this serverless job queue, **stick with the ULID-based approach** because:
+
+1. **Simplicity**: Easy to find logs by job ID
+2. **Cost-effective**: Minimal stream proliferation
+3. **Reliable**: ULID ensures uniqueness
+4. **Scalable**: Works at any volume
+5. **CloudWatch-friendly**: Chronological ordering
+
+**Add custom streams only when you have specific business requirements** that justify the additional complexity and cost.
 
 ### Testing the Message-Driven System
 
